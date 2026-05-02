@@ -2,75 +2,166 @@ import SwiftUI
 
 struct CoachDashboardView: View {
     @EnvironmentObject var store: DataStore
+
     var team: Team? { store.teams.first { $0.id == store.currentCareer?.teamID } }
     var nextMatch: MatchFixture? { store.nextMatchForCareer() }
+    var currentTeamID: UUID? { store.currentCareer?.teamID }
+    var sortedTable: [RankingEntry] { store.season.table.sorted { $0.points == $1.points ? $0.goalDifference > $1.goalDifference : $0.points > $1.points } }
+    var topScorer: Player? { store.players.max(by: { $0.stats.goals < $1.stats.goals }) }
+    var topAssister: Player? { store.players.max(by: { $0.stats.assists < $1.stats.assists }) }
+    var topRated: Player? { store.players.max(by: { $0.stats.averageRating < $1.stats.averageRating }) }
+    var lineupPlayers: [Player] {
+        let ids = Set(store.currentCareer?.selectedLineup ?? [])
+        return store.players.filter { ids.contains($0.id) }
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Dashboard Entraîneur").font(.title2.bold())
-                if let t = team { Text("Club: \(t.name)") }
-                if let m = nextMatch {
-                    Text("Prochain match: J\(m.matchday) - \(store.teamName(m.homeTeamID)) vs \(store.teamName(m.awayTeamID))")
-                } else { Text("Saison terminée") }
+            VStack(alignment: .leading, spacing: 14) {
+                DashboardCard(title: team?.name ?? "Club", subtitle: "Rôle: Entraîneur • Journée \(nextMatch?.matchday ?? 0)") {
+                    Text("Préparez votre onze et votre tactique avant le prochain match.").font(.caption).foregroundStyle(.secondary)
+                }
 
-                if let news = store.currentCareer?.latestNews, !news.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Actualités").font(.headline)
-                        ForEach(news, id: \.self) { Text("• \($0)").font(.caption) }
+                if let m = nextMatch {
+                    let isHome = m.homeTeamID == currentTeamID
+                    let opponent = store.teamName(isHome ? m.awayTeamID : m.homeTeamID)
+                    MatchPreviewCard(
+                        title: "Prochain match",
+                        details: "vs \(opponent) • \(m.date.formatted(date: .abbreviated, time: .omitted)) • \(isHome ? "Domicile" : "Extérieur")",
+                        cta: "Jouer le match"
+                    ) {
+                        _ = store.simulateNextMatchdayForCareer()
                     }
                 }
 
-                NavigationLink("Gestion d'équipe") { TeamManagementView() }.buttonStyle(.bordered)
-                NavigationLink("Classement") { RankingView() }.buttonStyle(.borderedProminent)
-                NavigationLink("Saison & calendrier") { SeasonView() }.buttonStyle(.bordered)
-                NavigationLink("Statistiques championnat") { ChampionshipStatsView() }.buttonStyle(.bordered)
-                if let m = nextMatch {
-                    NavigationLink("Lancer prochain match") { MatchSimulationView(fixtureID: m.id) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!store.canSimulateNextMatch())
-                    if !store.canSimulateNextMatch() { Text("Sélectionnez 11 titulaires pour simuler").font(.caption).foregroundStyle(.red) }
+                NavigationLink {
+                    RankingView()
+                } label: {
+                    DashboardCard(title: "Classement") {
+                        RankingMiniWidget(rows: sortedTable, currentTeamID: currentTeamID, teamName: store.teamName)
+                    }
+                }.buttonStyle(.plain)
+
+                NavigationLink { TeamManagementView() } label: {
+                    DashboardCard(title: "Gestion d'équipe") {
+                        let fatigue = lineupPlayers.isEmpty ? 0 : lineupPlayers.map { 100 - $0.fitness }.reduce(0,+) / lineupPlayers.count
+                        HStack { StatMiniCard(label: "Formation", value: store.currentCareer?.formation ?? "4-3-3"); StatMiniCard(label: "Mentalité", value: store.currentCareer?.tactic.rawValue ?? "Équilibré") }
+                        HStack { StatMiniCard(label: "Titulaires", value: "\(store.currentCareer?.selectedLineup.count ?? 0)/11"); StatMiniCard(label: "Fatigue moy.", value: "\(fatigue)%") }
+                    }
+                }.buttonStyle(.plain)
+
+                NavigationLink { ChampionshipStatsView() } label: {
+                    DashboardCard(title: "Statistiques championnat") {
+                        Text("Buteur: \(topScorer?.fullName ?? "-") (\(topScorer?.stats.goals ?? 0))").font(.caption)
+                        Text("Passeur: \(topAssister?.fullName ?? "-") (\(topAssister?.stats.assists ?? 0))").font(.caption)
+                        Text("Meilleure note: \(topRated?.fullName ?? "-") (\(String(format: "%.2f", topRated?.stats.averageRating ?? 0)))").font(.caption)
+                    }
+                }.buttonStyle(.plain)
+
+                NavigationLink { TransferMarketView() } label: {
+                    DashboardCard(title: "Marché des transferts") {
+                        Text("Budget transfert: \(Int(team?.budget.transfer ?? 0))€").font(.caption)
+                        Text("Shortlist: \(store.currentCareer?.shortlist.count ?? 0) joueurs").font(.caption)
+                    }
+                }.buttonStyle(.plain)
+
+                HStack {
+                    NavigationLink("Shortlist") { ShortlistView() }
+                    Spacer()
+                    NavigationLink("Historique transferts") { TransferHistoryView() }
                 }
-            }.padding()
+                .padding(.horizontal, 6)
+
+                DashboardCard(title: "Actualités") {
+                    if let news = store.currentCareer?.latestNews.prefix(3), !news.isEmpty {
+                        ForEach(Array(news), id: \.self) { Text("• \($0)").font(.caption) }
+                    } else {
+                        Text("Dernier résultat et infos transferts apparaîtront ici.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding()
         }
+        .background(AppTheme.background.ignoresSafeArea())
+        .navigationTitle("Mode Entraîneur")
     }
 }
 
 struct TeamManagementView: View {
     @EnvironmentObject var store: DataStore
     @State private var selected: Set<UUID> = []
+    @State private var formation = "4-3-3"
+
+    let formations = ["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-3-2"]
+
+    var players: [Player] {
+        guard let teamID = store.currentCareer?.teamID else { return [] }
+        return store.teamPlayers(teamID)
+    }
 
     var body: some View {
-        let teamID = store.currentCareer?.teamID
-        let players = teamID == nil ? [] : store.teamPlayers(teamID!)
-        Form {
-            Section("Tactique") {
-                Picker("Style", selection: Binding(get: { store.currentCareer?.tactic ?? .balanced }, set: { store.setTactic($0) })) {
-                    ForEach(Tactic.allCases) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented)
-            }
-            Section("Composition (11 titulaires)") {
-                Text("Sélectionnés: \(selected.count)/11")
-                ForEach(players) { p in
-                    Button("\(selected.contains(p.id) ? "✅" : "⬜️") \(p.fullName) - \(p.position.rawValue) | Fatigue \(100 - p.fitness)%") {
-                        if selected.contains(p.id) { selected.remove(p.id) }
-                        else if selected.count < 11 { selected.insert(p.id) }
-                        store.setLineup(Array(selected))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                DashboardCard(title: "Résumé", subtitle: "Choix tactiques") {
+                    Picker("Formation", selection: $formation) {
+                        ForEach(formations, id: \.self) { Text($0) }
                     }
+                    .pickerStyle(.segmented)
+                    Picker("Mentalité", selection: Binding(get: { store.currentCareer?.tactic ?? .balanced }, set: { store.setTactic($0) })) {
+                        ForEach(Tactic.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented)
+                    Text("Titulaires: \(selected.count)/11 • Fatigue moyenne: \(averageFatigue)%").font(.caption)
+                }
+
+                groupedSection(title: "Gardien", items: players.filter { $0.position == .gk })
+                groupedSection(title: "Défense", items: players.filter { [.cb,.lb,.rb].contains($0.position) })
+                groupedSection(title: "Milieu", items: players.filter { $0.position == .cm })
+                groupedSection(title: "Attaque", items: players.filter { [.lw,.rw,.st].contains($0.position) })
+
+                DashboardCard(title: "Banc des remplaçants") {
+                    ForEach(players.filter { !selected.contains($0.id) }) { p in PlayerRowCard(player: p) }
+                }
+
+                DashboardCard(title: "Alertes") {
+                    if selected.count < 11 { Text("⚠️ Moins de 11 titulaires").font(.caption) }
+                    if selected.count > 11 { Text("⚠️ Trop de titulaires").font(.caption) }
+                    if selectedPlayers.contains(where: { $0.fitness < 45 }) { Text("⚠️ Joueur très fatigué").font(.caption) }
+                    if !isFormationCompatible { Text("⚠️ Composition non adaptée à la formation").font(.caption) }
+                    if selected.count == 11 && isFormationCompatible && !selectedPlayers.contains(where: { $0.fitness < 45 }) { Text("✅ Composition prête").font(.caption) }
                 }
             }
-            Section("Effectif") {
-                ForEach(players) { p in
-                    VStack(alignment: .leading) {
-                        Text("\(p.fullName) | \(p.position.rawValue) | \(p.age) ans | GEN \(p.overall) | Forme \(p.fitness) | Moral \(p.morale)")
-                        if selected.contains(p.id) && p.fitness < 45 {
-                            Text("⚠️ Titulaire fatigué: pensez à la rotation").font(.caption).foregroundStyle(.orange)
-                        }
-                    }
-                }
+            .padding()
+        }
+        .background(AppTheme.background.ignoresSafeArea())
+        .onAppear {
+            selected = Set(store.currentCareer?.selectedLineup ?? [])
+            formation = store.currentCareer?.formation ?? "4-3-3"
+        }
+        .onChange(of: selected) { store.setLineup(Array($0)) }
+        .onChange(of: formation) { store.setFormation($0) }
+        .navigationTitle("Gestion d'équipe")
+    }
+
+    var selectedPlayers: [Player] { players.filter { selected.contains($0.id) } }
+    var averageFatigue: Int {
+        guard !selectedPlayers.isEmpty else { return 0 }
+        return selectedPlayers.map { 100 - $0.fitness }.reduce(0,+) / selectedPlayers.count
+    }
+    var isFormationCompatible: Bool {
+        let stCount = selectedPlayers.filter { $0.position == .st }.count
+        return formation == "4-4-2" ? stCount >= 2 : stCount >= 1
+    }
+
+    func groupedSection(title: String, items: [Player]) -> some View {
+        DashboardCard(title: title) {
+            ForEach(items) { p in
+                Button {
+                    if selected.contains(p.id) { selected.remove(p.id) }
+                    else if selected.count < 11 { selected.insert(p.id) }
+                } label: {
+                    PlayerRowCard(player: p, trailing: AnyView(Text(selected.contains(p.id) ? "Titulaire" : "Banc").font(.caption)))
+                }.buttonStyle(.plain)
             }
         }
-        .onAppear { selected = Set(store.currentCareer?.selectedLineup ?? []) }
-        .navigationTitle("Gestion d'équipe")
     }
 }

@@ -95,6 +95,7 @@ struct Career: Codable {
     var createdAt: Date
     var selectedLineup: [UUID] = []
     var tactic: Tactic = .balanced
+    var formation: String = "4-3-3"
     var lastSimulatedMatchday: Int?
     var latestNews: [String] = []
     var shortlist: [UUID] = []
