@@ -14,6 +14,13 @@ struct CoachDashboardView: View {
                     Text("Prochain match: J\(m.matchday) - \(store.teamName(m.homeTeamID)) vs \(store.teamName(m.awayTeamID))")
                 } else { Text("Saison terminée") }
 
+                if let news = store.currentCareer?.latestNews, !news.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Actualités").font(.headline)
+                        ForEach(news, id: \.self) { Text("• \($0)").font(.caption) }
+                    }
+                }
+
                 NavigationLink("Gestion d'équipe") { TeamManagementView() }.buttonStyle(.bordered)
                 NavigationLink("Classement") { RankingView() }.buttonStyle(.borderedProminent)
                 NavigationLink("Saison & calendrier") { SeasonView() }.buttonStyle(.bordered)
@@ -44,7 +51,7 @@ struct TeamManagementView: View {
             Section("Composition (11 titulaires)") {
                 Text("Sélectionnés: \(selected.count)/11")
                 ForEach(players) { p in
-                    Button("\(selected.contains(p.id) ? "✅" : "⬜️") \(p.fullName) - \(p.position.rawValue)") {
+                    Button("\(selected.contains(p.id) ? "✅" : "⬜️") \(p.fullName) - \(p.position.rawValue) | Fatigue \(100 - p.fitness)%") {
                         if selected.contains(p.id) { selected.remove(p.id) }
                         else if selected.count < 11 { selected.insert(p.id) }
                         store.setLineup(Array(selected))
@@ -52,7 +59,14 @@ struct TeamManagementView: View {
                 }
             }
             Section("Effectif") {
-                ForEach(players) { p in Text("\(p.fullName) | \(p.position.rawValue) | \(p.age) ans | GEN \(p.overall) | Forme \(p.fitness) | Moral \(p.morale)") }
+                ForEach(players) { p in
+                    VStack(alignment: .leading) {
+                        Text("\(p.fullName) | \(p.position.rawValue) | \(p.age) ans | GEN \(p.overall) | Forme \(p.fitness) | Moral \(p.morale)")
+                        if selected.contains(p.id) && p.fitness < 45 {
+                            Text("⚠️ Titulaire fatigué: pensez à la rotation").font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                }
             }
         }
         .onAppear { selected = Set(store.currentCareer?.selectedLineup ?? []) }

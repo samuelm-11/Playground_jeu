@@ -12,11 +12,13 @@ struct SeasonView: View {
     var body: some View {
         List {
             ForEach(grouped, id: \.0) { day, fixtures in
-                Section("Journée \(day) — \(fixtures.first?.date.formatted(date: .abbreviated, time: .omitted) ?? "")") {
+                Section("Journée \(day)") {
                     ForEach(fixtures) { f in
+                        let isUserClub = f.homeTeamID == store.currentCareer?.teamID || f.awayTeamID == store.currentCareer?.teamID
                         VStack(alignment: .leading) {
                             Text("\(store.teamName(f.homeTeamID)) vs \(store.teamName(f.awayTeamID))")
-                            Text(f.played ? "✅ Joué (\(f.homeGoals)-\(f.awayGoals))" : "🕒 À venir")
+                                .fontWeight(isUserClub ? .bold : .regular)
+                            Text(f.played ? "✅ \(f.homeGoals)-\(f.awayGoals)" : "🕒 \(f.date.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption)
                         }
                     }

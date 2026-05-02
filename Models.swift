@@ -64,6 +64,8 @@ struct Career: Codable {
     var createdAt: Date
     var selectedLineup: [UUID] = []
     var tactic: Tactic = .balanced
+    var lastSimulatedMatchday: Int?
+    var latestNews: [String] = []
 }
 
 struct DatabaseContainer: Codable { var players: [Player]; var teams: [Team]; var competitions: [Competition]; var season: Season; var career: Career? }

@@ -38,6 +38,10 @@ final class DataStore: ObservableObject {
         return season.fixtures.first { !$0.played && ($0.homeTeamID == teamID || $0.awayTeamID == teamID) }
     }
 
+    func fixturesForMatchday(_ matchday: Int) -> [MatchFixture] {
+        season.fixtures.filter { $0.matchday == matchday }.sorted { $0.date < $1.date }
+    }
+
     func canSimulateNextMatch() -> Bool {
         guard let c = currentCareer else { return false }
         return c.selectedLineup.count >= 11
@@ -46,37 +50,110 @@ final class DataStore: ObservableObject {
     func setLineup(_ ids: [UUID]) { currentCareer?.selectedLineup = Array(ids.prefix(11)); saveAll() }
     func setTactic(_ tactic: Tactic) { currentCareer?.tactic = tactic; saveAll() }
 
-    func simulateMatch(_ fixtureID: UUID) {
+    func simulateNextMatchdayForCareer() -> UUID? {
+        guard let teamID = currentCareer?.teamID, let next = nextMatchForCareer(), canSimulateNextMatch() else { return nil }
+        let matchday = next.matchday
+        guard currentCareer?.lastSimulatedMatchday != matchday else { return nil }
+
+        let dayFixtures = fixturesForMatchday(matchday)
+        guard dayFixtures.contains(where: { $0.homeTeamID == teamID || $0.awayTeamID == teamID }) else { return nil }
+
+        for f in dayFixtures where !f.played {
+            simulateFixture(f.id, detailedComments: f.id == next.id)
+        }
+
+        currentCareer?.lastSimulatedMatchday = matchday
+        recomputeTable()
+        updateRecoveryForNonStarters(teamID: teamID)
+        updateNews(for: next.id)
+        saveAll()
+        return next.id
+    }
+
+    private func simulateFixture(_ fixtureID: UUID, detailedComments: Bool) {
         guard let idx = season.fixtures.firstIndex(where: { $0.id == fixtureID }), !season.fixtures[idx].played else { return }
-        guard let career = currentCareer else { return }
         let f = season.fixtures[idx]
         let homeTeam = teams.first { $0.id == f.homeTeamID }!
         let awayTeam = teams.first { $0.id == f.awayTeamID }!
 
-        let homeStats = computeStrength(teamID: homeTeam.id, applyingCareerBonusIfManaged: homeTeam.id == career.teamID)
-        let awayStats = computeStrength(teamID: awayTeam.id, applyingCareerBonusIfManaged: awayTeam.id == career.teamID)
+        let homeStats = computeStrength(teamID: homeTeam.id, applyingCareerBonusIfManaged: homeTeam.id == currentCareer?.teamID)
+        let awayStats = computeStrength(teamID: awayTeam.id, applyingCareerBonusIfManaged: awayTeam.id == currentCareer?.teamID)
         let homeBase = 1.2 + (homeStats.rating - awayStats.rating) / 30 + 0.25
         let awayBase = 1.0 + (awayStats.rating - homeStats.rating) / 30
 
         let hg = max(0, Int((homeBase + Double.random(in: -0.8...1.0)).rounded()))
         let ag = max(0, Int((awayBase + Double.random(in: -0.8...1.0)).rounded()))
-        var comments = ["Coup d'envoi"]
-        for m in stride(from: 10, through: 90, by: 10) {
-            let e = Int.random(in: 0...4)
-            if e == 0 { comments.append("\(m)' Occasion pour \(Bool.random() ? homeTeam.name : awayTeam.name)") }
-            if e == 1 { comments.append("\(m)' Carton jaune") }
-            if e == 2 { comments.append("\(m)' Blessure légère") }
-            if e == 3 { comments.append("\(m)' Changement de dynamique") }
+
+        var comments: [String] = []
+        if detailedComments {
+            comments = ["Coup d'envoi"]
+            for m in stride(from: 10, through: 90, by: 10) {
+                switch Int.random(in: 0...4) {
+                case 0: comments.append("\(m)' Occasion pour \(Bool.random() ? homeTeam.name : awayTeam.name)")
+                case 1: comments.append("\(m)' Carton jaune")
+                case 2: comments.append("\(m)' Blessure légère")
+                case 3: comments.append("\(m)' Changement de dynamique")
+                default: break
+                }
+            }
+            comments.append("90' Fin du match")
+        } else {
+            comments = ["Match simulé automatiquement"]
         }
-        comments.append("90' Fin du match")
 
         season.fixtures[idx].homeGoals = hg
         season.fixtures[idx].awayGoals = ag
         season.fixtures[idx].played = true
         season.fixtures[idx].comments = comments
-        recomputeTable()
-        saveAll()
+
+        applyPostMatchImpacts(fixture: season.fixtures[idx])
     }
+
+    private func applyPostMatchImpacts(fixture: MatchFixture) {
+        guard let teamID = currentCareer?.teamID else { return }
+        guard fixture.homeTeamID == teamID || fixture.awayTeamID == teamID else { return }
+
+        let resultDelta: Int
+        if (fixture.homeTeamID == teamID && fixture.homeGoals > fixture.awayGoals) || (fixture.awayTeamID == teamID && fixture.awayGoals > fixture.homeGoals) {
+            resultDelta = 5
+        } else if fixture.homeGoals == fixture.awayGoals {
+            resultDelta = 1
+        } else {
+            resultDelta = -4
+        }
+
+        let lineup = Set(currentCareer?.selectedLineup ?? [])
+        for i in players.indices {
+            guard players[i].club == teamName(teamID) else { continue }
+            if lineup.contains(players[i].id) {
+                players[i].morale = clamp(players[i].morale + resultDelta)
+                players[i].fitness = clamp(players[i].fitness - 8)
+            }
+        }
+    }
+
+    private func updateRecoveryForNonStarters(teamID: UUID) {
+        let lineup = Set(currentCareer?.selectedLineup ?? [])
+        for i in players.indices {
+            guard players[i].club == teamName(teamID), !lineup.contains(players[i].id) else { continue }
+            players[i].fitness = clamp(players[i].fitness + 3)
+        }
+    }
+
+    private func updateNews(for fixtureID: UUID) {
+        guard let f = season.fixtures.first(where: { $0.id == fixtureID }), let teamID = currentCareer?.teamID else { return }
+        let isHome = f.homeTeamID == teamID
+        let gf = isHome ? f.homeGoals : f.awayGoals
+        let ga = isHome ? f.awayGoals : f.homeGoals
+        let lastResult = "Dernier match: \(teamName(f.homeTeamID)) \(f.homeGoals)-\(f.awayGoals) \(teamName(f.awayTeamID))"
+        let best = teamPlayers(teamID).max(by: { $0.overall < $1.overall })?.fullName ?? "N/A"
+        let morale = Int(teamPlayers(teamID).map(\.morale).reduce(0,+) / max(teamPlayers(teamID).count, 1))
+        let evolution = gf > ga ? "Moral en hausse" : (gf == ga ? "Moral stable" : "Moral en baisse")
+        let nextOpponent = nextMatchForCareer().map { teamName($0.homeTeamID == teamID ? $0.awayTeamID : $0.homeTeamID) } ?? "Saison terminée"
+        currentCareer?.latestNews = [lastResult, "Meilleur joueur: \(best)", "\(evolution) (moyenne: \(morale))", "Prochain adversaire: \(nextOpponent)"]
+    }
+
+    private func clamp(_ value: Int) -> Int { min(100, max(0, value)) }
 
     private func computeStrength(teamID: UUID, applyingCareerBonusIfManaged: Bool) -> (rating: Double, morale: Double, fitness: Double) {
         let squad = teamPlayers(teamID)
