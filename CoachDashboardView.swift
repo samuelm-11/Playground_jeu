@@ -24,6 +24,7 @@ struct CoachDashboardView: View {
                 NavigationLink("Gestion d'équipe") { TeamManagementView() }.buttonStyle(.bordered)
                 NavigationLink("Classement") { RankingView() }.buttonStyle(.borderedProminent)
                 NavigationLink("Saison & calendrier") { SeasonView() }.buttonStyle(.bordered)
+                NavigationLink("Statistiques championnat") { ChampionshipStatsView() }.buttonStyle(.bordered)
                 if let m = nextMatch {
                     NavigationLink("Lancer prochain match") { MatchSimulationView(fixtureID: m.id) }
                         .buttonStyle(.borderedProminent)
