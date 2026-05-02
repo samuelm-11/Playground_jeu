@@ -14,6 +14,9 @@ struct SportingDirectorDashboardView: View {
                 Text("Transferts: 2 cibles suivies")
             }
             NavigationLink("Base de données joueurs") { DatabaseView() }
+            NavigationLink("Marché des transferts") { TransferMarketView() }
+            NavigationLink("Historique des transferts") { TransferHistoryView() }
+            NavigationLink("Statistiques championnat") { ChampionshipStatsView() }
             Spacer()
         }.padding()
     }
