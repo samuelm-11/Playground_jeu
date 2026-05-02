@@ -23,15 +23,32 @@ enum FakeData {
     static func defaultSeason(teams: [Team]) -> Season {
         var fixtures: [MatchFixture] = []
         let startDate = Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 12)) ?? .now
-        var day = 1
-        for i in 0..<teams.count {
-            for j in (i+1)..<teams.count {
-                fixtures.append(.init(matchday: day, homeTeamID: teams[i].id, awayTeamID: teams[j].id, date: startDate.addingTimeInterval(Double(day - 1) * 86400 * 7)))
-                day += 1
-                fixtures.append(.init(matchday: day, homeTeamID: teams[j].id, awayTeamID: teams[i].id, date: startDate.addingTimeInterval(Double(day - 1) * 86400 * 7)))
-                day += 1
-            }
+        let teamIDs = teams.map(\.id)
+        guard teamIDs.count >= 2, teamIDs.count % 2 == 0 else {
+            return Season(yearLabel: "2026/2027", fixtures: fixtures, table: teams.map { RankingEntry(teamID: $0.id) })
         }
-        return Season(yearLabel: "2026/2027", fixtures: fixtures.sorted { $0.date < $1.date }, table: teams.map { RankingEntry(teamID: $0.id) })
+
+        var rotation = teamIDs
+        let rounds = teamIDs.count - 1
+        for round in 0..<rounds {
+            let date = startDate.addingTimeInterval(Double(round) * 86400 * 7)
+            for pair in 0..<(teamIDs.count / 2) {
+                let home = rotation[pair]
+                let away = rotation[rotation.count - 1 - pair]
+                fixtures.append(.init(matchday: round + 1, homeTeamID: home, awayTeamID: away, date: date))
+            }
+            let fixed = rotation.removeFirst()
+            let last = rotation.removeLast()
+            rotation.insert(last, at: 0)
+            rotation.insert(fixed, at: 0)
+        }
+
+        let firstLeg = fixtures
+        for f in firstLeg {
+            let secondDate = f.date.addingTimeInterval(Double(rounds) * 86400 * 7)
+            fixtures.append(.init(matchday: f.matchday + rounds, homeTeamID: f.awayTeamID, awayTeamID: f.homeTeamID, date: secondDate))
+        }
+
+        return Season(yearLabel: "2026/2027", fixtures: fixtures.sorted { $0.matchday == $1.matchday ? $0.date < $1.date : $0.matchday < $1.matchday }, table: teams.map { RankingEntry(teamID: $0.id) })
     }
 }
