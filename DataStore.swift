@@ -16,7 +16,7 @@ final class DataStore: ObservableObject {
         loadSaveOrBootstrap(); normalizeSquadsAndBudgets()
     }
     func normalizeSquadsAndBudgets() { for i in teams.indices { teams[i].wageBill = teamPlayers(teams[i].id).map(\.salary).reduce(0,+); teams[i].wageBudgetAvailable = max(0, teams[i].budget.wage - teams[i].wageBill) } }
-    func createCareer(role: Role, teamID: UUID) { currentCareer = Career(role: role, teamID: teamID, createdAt: .now, selectedLineup: Array(teamPlayers(teamID).prefix(11).map(\.id)), tactic: .balanced); saveAll() }
+    func createCareer(role: Role, teamID: UUID) { currentCareer = Career(role: role, teamID: teamID, createdAt: .now, selectedLineup: Array(teamPlayers(teamID).prefix(11).map(\.id)), tactic: .balanced, formation: "4-3-3"); saveAll() }
     func loadSaveOrBootstrap() { guard let data = UserDefaults.standard.data(forKey: saveKey), let db = try? JSONDecoder().decode(DatabaseContainer.self, from: data) else { return }; players = db.players; teams = db.teams; competitions = db.competitions; season = db.season; currentCareer = db.career; transferHistory = db.transferHistory }
     func saveAll() { let db = DatabaseContainer(players: players, teams: teams, competitions: competitions, season: season, career: currentCareer, transferHistory: transferHistory); if let data = try? JSONEncoder().encode(db) { UserDefaults.standard.set(data, forKey: saveKey) } }
     func teamName(_ id: UUID) -> String { teams.first { $0.id == id }?.name ?? "Équipe" }
@@ -26,6 +26,7 @@ final class DataStore: ObservableObject {
     func canSimulateNextMatch() -> Bool { (currentCareer?.selectedLineup.count ?? 0) >= 11 }
     func setLineup(_ ids: [UUID]) { currentCareer?.selectedLineup = Array(ids.prefix(11)); saveAll() }
     func setTactic(_ tactic: Tactic) { currentCareer?.tactic = tactic; saveAll() }
+    func setFormation(_ formation: String) { currentCareer?.formation = formation; saveAll() }
 
     func simulateNextMatchdayForCareer() -> UUID? { guard let teamID = currentCareer?.teamID, let next = nextMatchForCareer(), canSimulateNextMatch() else { return nil }; let day = next.matchday; guard currentCareer?.lastSimulatedMatchday != day else { return nil }; for f in fixturesForMatchday(day) where !f.played { simulateFixture(f.id, detailedComments: f.id == next.id) }; currentCareer?.lastSimulatedMatchday = day; recomputeTable(); updateRecoveryForNonStarters(teamID: teamID); updateNews(for: next.id); if day % 4 == 0 { simulateAITransfers() }; saveAll(); return next.id }
 
