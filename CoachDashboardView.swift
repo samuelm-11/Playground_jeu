@@ -3,6 +3,8 @@ import SwiftUI
 struct CoachDashboardView: View {
     @EnvironmentObject var store: DataStore
 
+    private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
     var team: Team? { store.teams.first { $0.id == store.currentCareer?.teamID } }
     var nextMatch: MatchFixture? { store.nextMatchForCareer() }
     var currentTeamID: UUID? { store.currentCareer?.teamID }
@@ -19,7 +21,9 @@ struct CoachDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 DashboardCard(title: team?.name ?? "Club", subtitle: "Rôle: Entraîneur • Journée \(nextMatch?.matchday ?? 0)") {
-                    Text("Préparez votre onze et votre tactique avant le prochain match.").font(.caption).foregroundStyle(.secondary)
+                    Text("Préparez votre onze, vos choix tactiques et surveillez le marché avant le prochain match.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let m = nextMatch {
@@ -42,41 +46,56 @@ struct CoachDashboardView: View {
                     }
                 }.buttonStyle(.plain)
 
-                NavigationLink { TeamManagementView() } label: {
-                    DashboardCard(title: "Gestion d'équipe") {
-                        let fatigue = lineupPlayers.isEmpty ? 0 : lineupPlayers.map { 100 - $0.fitness }.reduce(0,+) / lineupPlayers.count
-                        HStack { StatMiniCard(label: "Formation", value: store.currentCareer?.formation ?? "4-3-3"); StatMiniCard(label: "Mentalité", value: store.currentCareer?.tactic.rawValue ?? "Équilibré") }
-                        HStack { StatMiniCard(label: "Titulaires", value: "\(store.currentCareer?.selectedLineup.count ?? 0)/11"); StatMiniCard(label: "Fatigue moy.", value: "\(fatigue)%") }
-                    }
-                }.buttonStyle(.plain)
+                LazyVGrid(columns: grid, spacing: 12) {
+                    NavigationLink { TeamManagementView() } label: {
+                        DashboardCard(title: "Gestion d'équipe") {
+                            let fatigue = lineupPlayers.isEmpty ? 0 : lineupPlayers.map { 100 - $0.fitness }.reduce(0,+) / lineupPlayers.count
+                            StatMiniCard(label: "Formation", value: store.currentCareer?.formation ?? "4-3-3")
+                            StatMiniCard(label: "Mentalité", value: store.currentCareer?.tactic.rawValue ?? "Équilibré")
+                            StatMiniCard(label: "Titulaires", value: "\(store.currentCareer?.selectedLineup.count ?? 0)/11")
+                            StatMiniCard(label: "Fatigue moy.", value: "\(fatigue)%")
+                        }
+                    }.buttonStyle(.plain)
 
-                NavigationLink { ChampionshipStatsView() } label: {
-                    DashboardCard(title: "Statistiques championnat") {
-                        Text("Buteur: \(topScorer?.fullName ?? "-") (\(topScorer?.stats.goals ?? 0))").font(.caption)
-                        Text("Passeur: \(topAssister?.fullName ?? "-") (\(topAssister?.stats.assists ?? 0))").font(.caption)
-                        Text("Meilleure note: \(topRated?.fullName ?? "-") (\(String(format: "%.2f", topRated?.stats.averageRating ?? 0)))").font(.caption)
-                    }
-                }.buttonStyle(.plain)
+                    NavigationLink { ChampionshipStatsView() } label: {
+                        DashboardCard(title: "Stats championnat") {
+                            Text("Buteur: \(topScorer?.fullName ?? "-") (\(topScorer?.stats.goals ?? 0))").font(.caption)
+                            Text("Passeur: \(topAssister?.fullName ?? "-") (\(topAssister?.stats.assists ?? 0))").font(.caption)
+                            Text("Meilleure note: \(topRated?.fullName ?? "-") (\(String(format: "%.2f", topRated?.stats.averageRating ?? 0)))").font(.caption)
+                        }
+                    }.buttonStyle(.plain)
 
-                NavigationLink { TransferMarketView() } label: {
-                    DashboardCard(title: "Marché des transferts") {
-                        Text("Budget transfert: \(Int(team?.budget.transfer ?? 0))€").font(.caption)
-                        Text("Shortlist: \(store.currentCareer?.shortlist.count ?? 0) joueurs").font(.caption)
-                    }
-                }.buttonStyle(.plain)
+                    NavigationLink { TransferMarketView() } label: {
+                        DashboardCard(title: "Marché transferts") {
+                            Text("Budget: \(Int(team?.budget.transfer ?? 0))€").font(.caption)
+                            Text("Shortlist: \(store.currentCareer?.shortlist.count ?? 0)").font(.caption)
+                            Text("Offres rapides disponibles").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }.buttonStyle(.plain)
 
-                HStack {
-                    NavigationLink("Shortlist") { ShortlistView() }
-                    Spacer()
-                    NavigationLink("Historique transferts") { TransferHistoryView() }
+                    NavigationLink { ShortlistView() } label: {
+                        DashboardCard(title: "Shortlist") {
+                            Text("Joueurs suivis: \(store.currentCareer?.shortlist.count ?? 0)").font(.caption)
+                            Text("Consulter les profils et faire une offre.").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }.buttonStyle(.plain)
                 }
-                .padding(.horizontal, 6)
+
+                NavigationLink {
+                    TransferHistoryView()
+                } label: {
+                    DashboardCard(title: "Historique transferts", subtitle: "Toutes les offres et décisions") {
+                        Text("Dernière entrée: \(latestTransferText)").font(.caption)
+                    }
+                }.buttonStyle(.plain)
 
                 DashboardCard(title: "Actualités") {
-                    if let news = store.currentCareer?.latestNews.prefix(3), !news.isEmpty {
+                    if let news = store.currentCareer?.latestNews.prefix(4), !news.isEmpty {
                         ForEach(Array(news), id: \.self) { Text("• \($0)").font(.caption) }
                     } else {
-                        Text("Dernier résultat et infos transferts apparaîtront ici.").font(.caption).foregroundStyle(.secondary)
+                        Text("Dernier résultat, prochain adversaire et infos transfert apparaîtront ici.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -84,6 +103,12 @@ struct CoachDashboardView: View {
         }
         .background(AppTheme.background.ignoresSafeArea())
         .navigationTitle("Mode Entraîneur")
+    }
+
+    var latestTransferText: String {
+        guard let last = store.transferHistory.first else { return "Aucun transfert enregistré" }
+        let name = store.players.first(where: { $0.id == last.playerID })?.fullName ?? "Joueur"
+        return "\(name) • \(last.accepted ? "Accepté" : "Refusé")"
     }
 }
 
@@ -102,7 +127,7 @@ struct TeamManagementView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                DashboardCard(title: "Résumé", subtitle: "Choix tactiques") {
+                DashboardCard(title: "Résumé coaching", subtitle: "Formation + état de l'effectif") {
                     Picker("Formation", selection: $formation) {
                         ForEach(formations, id: \.self) { Text($0) }
                     }
@@ -110,19 +135,26 @@ struct TeamManagementView: View {
                     Picker("Mentalité", selection: Binding(get: { store.currentCareer?.tactic ?? .balanced }, set: { store.setTactic($0) })) {
                         ForEach(Tactic.allCases) { Text($0.rawValue).tag($0) }
                     }.pickerStyle(.segmented)
-                    Text("Titulaires: \(selected.count)/11 • Fatigue moyenne: \(averageFatigue)%").font(.caption)
+                    HStack {
+                        StatMiniCard(label: "Formation", value: formation)
+                        StatMiniCard(label: "Mentalité", value: store.currentCareer?.tactic.rawValue ?? "Équilibré")
+                    }
+                    HStack {
+                        StatMiniCard(label: "Titulaires", value: "\(selected.count)/11")
+                        StatMiniCard(label: "Fatigue moy.", value: "\(averageFatigue)%")
+                    }
                 }
 
                 groupedSection(title: "Gardien", items: players.filter { $0.position == .gk })
                 groupedSection(title: "Défense", items: players.filter { [.cb,.lb,.rb].contains($0.position) })
-                groupedSection(title: "Milieu", items: players.filter { $0.position == .cm })
+                groupedSection(title: "Milieu", items: players.filter { [.cm].contains($0.position) })
                 groupedSection(title: "Attaque", items: players.filter { [.lw,.rw,.st].contains($0.position) })
 
                 DashboardCard(title: "Banc des remplaçants") {
                     ForEach(players.filter { !selected.contains($0.id) }) { p in PlayerRowCard(player: p) }
                 }
 
-                DashboardCard(title: "Alertes") {
+                DashboardCard(title: "Alertes composition") {
                     if selected.count < 11 { Text("⚠️ Moins de 11 titulaires").font(.caption) }
                     if selected.count > 11 { Text("⚠️ Trop de titulaires").font(.caption) }
                     if selectedPlayers.contains(where: { $0.fitness < 45 }) { Text("⚠️ Joueur très fatigué").font(.caption) }
