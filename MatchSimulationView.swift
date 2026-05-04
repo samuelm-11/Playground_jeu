@@ -3,47 +3,34 @@ import SwiftUI
 struct MatchSimulationView: View {
     @EnvironmentObject var store: DataStore
     let fixtureID: UUID
-    @State private var simulatedUserFixtureID: UUID?
 
     var fixture: MatchFixture? { store.season.fixtures.first { $0.id == fixtureID } }
-    var simulatedMatchday: Int? { store.season.fixtures.first(where: { $0.id == simulatedUserFixtureID })?.matchday }
-    var matchdayFixtures: [MatchFixture] {
-        guard let day = simulatedMatchday else { return [] }
-        return store.fixturesForMatchday(day)
-    }
+    var report: MatchCenterReport? { store.currentCareer?.lastMatchReport?.fixtureID == fixtureID ? store.currentCareer?.lastMatchReport : nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if simulatedUserFixtureID == nil, let f = fixture {
-                Text("Journée \(f.matchday)").font(.headline)
-                Text(f.date.formatted(date: .long, time: .omitted))
-                Text("\(store.teamName(f.homeTeamID)) vs \(store.teamName(f.awayTeamID))").font(.title3.bold())
-                Button("Lancer prochain match") {
-                    simulatedUserFixtureID = store.simulateNextMatchdayForCareer()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!store.canSimulateNextMatch())
-            } else if let userID = simulatedUserFixtureID, let userMatch = store.season.fixtures.first(where: { $0.id == userID }) {
-                Text("Résultats de la journée \(userMatch.matchday)").font(.title3.bold())
-                Text("Votre match").font(.headline)
-                Text("\(store.teamName(userMatch.homeTeamID)) \(userMatch.homeGoals)-\(userMatch.awayGoals) \(store.teamName(userMatch.awayTeamID))")
-                List {
-                    Section("Commentaires") {
-                        ForEach(userMatch.comments, id: \.self) { Text($0) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let f = fixture {
+                    DashboardCard(title: "Match Center", subtitle: "Journée \(f.matchday)") {
+                        Text("\(store.teamName(f.homeTeamID)) \(f.homeGoals) - \(f.awayGoals) \(store.teamName(f.awayTeamID))").font(.title.bold())
+                        Text(statusText(f)).font(.caption)
+                        Button("Lancer le match") { _ = store.simulateNextMatchdayForCareer() }.buttonStyle(.borderedProminent).disabled(f.played || !store.canSimulateNextMatch())
                     }
-                    Section("Autres matchs") {
-                        ForEach(matchdayFixtures.filter { $0.id != userID }) { f in
-                            Text("\(store.teamName(f.homeTeamID)) \(f.homeGoals)-\(f.awayGoals) \(store.teamName(f.awayTeamID))")
+                    if let r = report {
+                        DashboardCard(title: "Timeline") { ForEach(r.events) { Text($0.text).font(.caption) } }
+                        DashboardCard(title: "Statistiques") {
+                            if let h = r.homeStats, let a = r.awayStats {
+                                statRow("Possession", "\(h.possession)%", "\(a.possession)%"); statRow("Tirs", "\(h.shots)", "\(a.shots)"); statRow("Cadrés", "\(h.shotsOnTarget)", "\(a.shotsOnTarget)")
+                                statRow("Fautes", "\(h.fouls)", "\(a.fouls)"); statRow("xG", String(format:"%.2f", h.xg), String(format:"%.2f", a.xg))
+                            }
                         }
+                        DashboardCard(title: "Homme du match") { Text(store.players.first(where:{$0.id == r.playerOfTheMatchID})?.fullName ?? "-") }
+                        DashboardCard(title: "Notes joueurs") { ForEach(r.ratings.sorted(by:{$0.rating > $1.rating})) { e in Text("\(store.players.first(where:{$0.id==e.playerID})?.shortName ?? "Joueur") • \(String(format:"%.1f", e.rating))").font(.caption) } }
                     }
                 }
-                NavigationLink("Retour au dashboard") { DashboardView() }.buttonStyle(.bordered)
-            } else {
-                Text("Aucune simulation possible.")
-            }
-            Spacer()
-        }
-        .padding()
-        .navigationTitle("Simulation")
+            }.padding()
+        }.navigationTitle("Match Center")
     }
+    func statRow(_ n:String,_ l:String,_ r:String)->some View { HStack{ Text(l).frame(width:50); Spacer(); Text(n).font(.caption); Spacer(); Text(r).frame(width:50) } }
+    func statusText(_ f: MatchFixture) -> String { f.played ? "Terminé" : "Avant-match" }
 }
