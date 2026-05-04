@@ -21,17 +21,28 @@ struct PlayerDetailView: View {
     @State private var amount = ""
     @State private var feedback = ""
     var body: some View {
-        Form {
-            Section("Profil") { Text(player.fullName); Text("\(player.age) ans - \(player.nationality)"); Text("\(player.club) • \(player.position.rawValue)") }
-            Section("Stats saison") { Text("MJ \(player.stats.matchesPlayed) • Buts \(player.stats.goals) • Passes \(player.stats.assists)"); Text("Note moy. \(String(format: "%.2f", player.stats.averageRating))") }
-            Section("Contrat") { Text("Salaire \(Int(player.salary))€"); Text("Valeur \(Int(player.estimatedValue))€"); Text("Jusqu'en \(player.contractUntilYear)") }
-            Button((store.currentCareer?.shortlist.contains(player.id) == true) ? "Retirer de la shortlist" : "Ajouter à la shortlist") { store.toggleShortlist(playerID: player.id) }
-            Section("Faire une offre") {
-                TextField("Montant", text: $amount)
-                Button("Envoyer") { feedback = store.makeOffer(playerID: player.id, amount: Double(amount) ?? 0) }
-                if !feedback.isEmpty { Text(feedback).foregroundStyle(feedback.contains("acceptée") ? .green : .orange) }
-            }
-        }.navigationTitle("Fiche joueur")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                DashboardCard(title: "Profil") { Text(player.fullName); Text("\(player.age) ans - \(player.nationality)"); Text("\(player.club) • \(player.position.rawValue)") }
+                DashboardCard(title: "Stats saison") { Text("MJ \(player.stats.matchesPlayed) • Buts \(player.stats.goals) • Passes \(player.stats.assists)"); Text("Note moy. \(String(format: "%.2f", player.stats.averageRating))") }
+                DashboardCard(title: "Contrat") { Text("Salaire \(Int(player.salary))€"); Text("Valeur \(Int(player.estimatedValue))€"); Text("Jusqu'en \(player.contractUntilYear)") }
+
+                DashboardCard(title: "Actions recrutement") {
+                    PillButton(title: (store.currentCareer?.shortlist.contains(player.id) == true) ? "Retirer shortlist" : "Ajouter shortlist") { store.toggleShortlist(playerID: player.id) }
+                    TextField("Montant de l'offre", text: $amount)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                    PillButton(title: "Faire une offre", color: AppTheme.accent) {
+                        feedback = store.makeOffer(playerID: player.id, amount: Double(amount) ?? 0)
+                    }
+                    if !feedback.isEmpty {
+                        Text(feedback)
+                            .foregroundStyle(feedback.contains("acceptée") ? AppTheme.success : (feedback.contains("insuffisant") ? AppTheme.danger : AppTheme.warning))
+                            .font(.subheadline.bold())
+                    }
+                }
+            }.padding()
+        }.background(AppTheme.background.ignoresSafeArea()).navigationTitle("Fiche joueur")
     }
 }
 
@@ -57,24 +68,37 @@ struct TransferMarketView: View {
     }
 
     var body: some View {
-        VStack {
-            Form {
-                TextField("Recherche par nom", text: $query)
-                Picker("Poste", selection: $selectedPosition) { Text("Tous").tag(Position?.none); ForEach(Position.allCases){ Text($0.rawValue).tag(Position?.some($0)) } }
-                Stepper("Âge max: \(maxAge)", value: $maxAge, in: 16...40)
-                Slider(value: $maxValue, in: 500_000...80_000_000, step: 500_000) { Text("Valeur max") }
-                Picker("Tri", selection: $sort) { Text("Note").tag("Note"); Text("Potentiel").tag("Potentiel"); Text("Valeur").tag("Valeur") }
-            }
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(filtered) { p in
-                        NavigationLink(destination: PlayerDetailView(player: p)) {
-                            PlayerRowCard(player: p, trailing: AnyView(VStack { Button("Shortlist") { store.toggleShortlist(playerID: p.id) }.font(.caption2); Text("Voir fiche").font(.caption2).foregroundStyle(.secondary) }))
-                        }.buttonStyle(.plain)
+        ScrollView {
+            VStack(spacing: 12) {
+                DashboardCard(title: "Filtres marché") {
+                    TextField("Recherche par nom", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                    Picker("Poste", selection: $selectedPosition) { Text("Tous").tag(Position?.none); ForEach(Position.allCases){ Text($0.rawValue).tag(Position?.some($0)) } }
+                    Stepper("Âge max: \(maxAge)", value: $maxAge, in: 16...40)
+                    VStack(alignment: .leading) {
+                        Text("Valeur max: \(Int(maxValue))€").font(.caption)
+                        Slider(value: $maxValue, in: 500_000...80_000_000, step: 500_000)
                     }
-                }.padding(.horizontal)
+                    Picker("Tri", selection: $sort) { Text("Note").tag("Note"); Text("Potentiel").tag("Potentiel"); Text("Valeur").tag("Valeur") }
+                }
+
+                ForEach(filtered) { p in
+                    NavigationLink(destination: PlayerDetailView(player: p)) {
+                        DashboardCard(title: p.fullName, subtitle: "\(p.club) • \(p.position.rawValue)") {
+                            HStack { StatMiniCard(label: "Âge", value: "\(p.age)"); StatMiniCard(label: "Note", value: "\(p.overall)"); StatMiniCard(label: "Pot.", value: "\(p.potential)") }
+                            HStack { StatMiniCard(label: "Valeur", value: "\(Int(p.estimatedValue))€"); StatMiniCard(label: "Salaire", value: "\(Int(p.salary))€") }
+                            HStack {
+                                PillButton(title: "Shortlist") { store.toggleShortlist(playerID: p.id) }
+                                Spacer()
+                                Text("Voir fiche").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }.buttonStyle(.plain)
+                }
             }
+            .padding()
         }
+        .background(AppTheme.background.ignoresSafeArea())
         .navigationTitle("Marché des transferts")
     }
 }
@@ -95,5 +119,13 @@ struct ShortlistView: View {
 
 struct TransferHistoryView: View {
     @EnvironmentObject var store: DataStore
-    var body: some View { List(store.transferHistory) { t in VStack(alignment:.leading){ Text("\(store.players.first(where:{$0.id==t.playerID})?.fullName ?? "Joueur") - \(t.accepted ? "Accepté":"Refusé")"); Text("\(store.teamName(t.fromTeamID)) → \(store.teamName(t.toTeamID)) | \(Int(t.amount))€").font(.caption); Text(t.date.formatted(date: .abbreviated, time: .shortened)).font(.caption2) } }.navigationTitle("Historique transferts") }
+    var body: some View {
+        List(store.transferHistory) { t in
+            VStack(alignment:.leading) {
+                Text("\(store.players.first(where:{$0.id==t.playerID})?.fullName ?? "Joueur") - \(t.accepted ? "Accepté":"Refusé")")
+                Text("\(store.teamName(t.fromTeamID)) → \(store.teamName(t.toTeamID)) | \(Int(t.amount))€").font(.caption)
+                Text(t.date.formatted(date: .abbreviated, time: .shortened)).font(.caption2)
+            }
+        }.navigationTitle("Historique transferts")
+    }
 }
