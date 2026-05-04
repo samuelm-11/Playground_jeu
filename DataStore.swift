@@ -25,13 +25,31 @@ final class DataStore: ObservableObject {
         let day=next.matchday; guard currentCareer?.lastSimulatedMatchday != day else { return nil }
         var report = MatchCenterReport(fixtureID: next.id)
         report.status = .live
-        for f in fixturesForMatchday(day) where !f.played { let detailed = f.id == next.id; simulateFixture(f.id, detailedComments: detailed, report: detailed ? &report : nil) }
+        for fixture in fixturesForMatchday(day) where !fixture.played {
+            let isDetailedMatch = fixture.id == next.id
+
+            if isDetailedMatch {
+                simulateFixture(
+                    fixture.id,
+                    detailedComments: true,
+                    report: &report
+                )
+            } else {
+                var emptyReport = MatchCenterReport(fixtureID: fixture.id)
+
+                simulateFixture(
+                    fixture.id,
+                    detailedComments: false,
+                    report: &emptyReport
+                )
+            }
+        }
         report.status = .finished; report.minute = 90; currentCareer?.lastMatchReport = report
         currentCareer?.lastSimulatedMatchday = day; recomputeTable(); updateRecoveryForNonStarters(teamID: teamID); reduceSuspensions(); updateBoard(); pushNews(title:"Journée \(day) terminée", category:.match)
         saveAll(); return next.id
     }
 
-    private func simulateFixture(_ fixtureID: UUID, detailedComments: Bool, report: inout MatchCenterReport?) {
+    private func simulateFixture(_ fixtureID: UUID, detailedComments: Bool, report: inout MatchCenterReport) {
         guard let idx=season.fixtures.firstIndex(where:{$0.id==fixtureID}), !season.fixtures[idx].played else { return }
         let f=season.fixtures[idx]
         let managedHome = f.homeTeamID == currentCareer?.teamID
@@ -40,24 +58,24 @@ final class DataStore: ObservableObject {
         let ag = max(0, Int((1.0 + (!managedHome ? boost:0) + Double.random(in:-0.8...1.4)).rounded()))
         season.fixtures[idx].homeGoals=hg; season.fixtures[idx].awayGoals=ag; season.fixtures[idx].played=true
         var comments=["Coup d'envoi"]
-        if detailed { report?.minute = 1 }
+        if detailedComments { report.minute = 1 }
         for m in stride(from: 12, through: 90, by: Int.random(in: 11...17)) {
-            if detailed, Bool.random() { let txt = "\(m)’ ⚽ Action dangereuse"; comments.append(txt); report?.events.append(.init(minute:m,icon:"⚡️",text:txt)) }
-            if m == 45 { comments.append("45’ Mi-temps"); report?.events.append(.init(minute:45,icon:"⏸️",text:"45’ Mi-temps")) }
+            if detailedComments, Bool.random() { let txt = "\(m)’ ⚽ Action dangereuse"; comments.append(txt); report.events.append(.init(minute:m,icon:"⚡️",text:txt)) }
+            if m == 45 { comments.append("45’ Mi-temps"); report.events.append(.init(minute:45,icon:"⏸️",text:"45’ Mi-temps")) }
         }
-        let end="90’ Fin du match : \(teamName(f.homeTeamID)) \(hg) - \(ag) \(teamName(f.awayTeamID))"; comments.append(end); report?.events.append(.init(minute:90,icon:"🏁",text:end))
+        let end="90’ Fin du match : \(teamName(f.homeTeamID)) \(hg) - \(ag) \(teamName(f.awayTeamID))"; comments.append(end); report.events.append(.init(minute:90,icon:"🏁",text:end))
         season.fixtures[idx].comments = detailedComments ? comments : ["Match simulé automatiquement"]
-        updatePlayerStats(homeTeamID:f.homeTeamID, awayTeamID:f.awayTeamID, homeGoals:hg, awayGoals:ag, detailed:detailed, report:&report)
+        updatePlayerStats(homeTeamID:f.homeTeamID, awayTeamID:f.awayTeamID, homeGoals:hg, awayGoals:ag, detailed:detailedComments, report:&report)
     }
 
-    private func updatePlayerStats(homeTeamID: UUID, awayTeamID: UUID, homeGoals:Int, awayGoals:Int, detailed: Bool, report: inout MatchCenterReport?) {
+    private func updatePlayerStats(homeTeamID: UUID, awayTeamID: UUID, homeGoals:Int, awayGoals:Int, detailed: Bool, report: inout MatchCenterReport) {
         applyStatsForTeam(squad: teamPlayers(homeTeamID), goals: homeGoals, isManaged: homeTeamID == currentCareer?.teamID, report: &report)
         applyStatsForTeam(squad: teamPlayers(awayTeamID), goals: awayGoals, isManaged: awayTeamID == currentCareer?.teamID, report: &report)
-        if detailed { report?.homeStats = makeTeamStats(goals: homeGoals); report?.awayStats = makeTeamStats(goals: awayGoals) }
+        if detailed { report.homeStats = makeTeamStats(goals: homeGoals); report.awayStats = makeTeamStats(goals: awayGoals) }
     }
     private func makeTeamStats(goals:Int)->MatchTeamStats { .init(possession:Int.random(in:43...57), shots:Int.random(in:8...18), shotsOnTarget:Int.random(in:2...9), fouls:Int.random(in:7...18), yellows:Int.random(in:0...4), reds:Int.random(in:0...1), corners:Int.random(in:1...9), xg: Double(goals)+Double.random(in:0.3...1.8)) }
 
-    private func applyStatsForTeam(squad:[Player], goals:Int, isManaged:Bool, report: inout MatchCenterReport?) {
+    private func applyStatsForTeam(squad:[Player], goals:Int, isManaged:Bool, report: inout MatchCenterReport) {
         let starters = isManaged ? Set(currentCareer?.selectedLineup ?? Array(squad.prefix(11).map(\.id))) : Set(Array(squad.shuffled().prefix(11).map(\.id)))
         for i in players.indices where squad.contains(where:{$0.id==players[i].id}) {
             if starters.contains(players[i].id) { players[i].stats.matchesPlayed += 1; players[i].stats.starts += 1; players[i].stats.minutesPlayed += Int.random(in:65...95); players[i].fitness=max(25, players[i].fitness-Int.random(in:4...12)) }
@@ -65,11 +83,11 @@ final class DataStore: ObservableObject {
             if Int.random(in:0...100)<16 { players[i].stats.yellowCards += 1; players[i].yellowCardsAccumulated += 1; if players[i].yellowCardsAccumulated >= 5 { players[i].status = .suspended; players[i].suspensionMatchesRemaining = 1; players[i].yellowCardsAccumulated = 0 } }
             if Int.random(in:0...100)<2 { players[i].stats.redCards += 1; players[i].status = .suspended; players[i].suspensionMatchesRemaining = 1 }
             if Int.random(in:0...100)<4 { players[i].status = .injured; players[i].injuryDaysRemaining = Int.random(in:4...25); if isManaged { pushNews(title:"Blessure: \(players[i].fullName) absent \(players[i].injuryDaysRemaining) jours", category:.injury) } }
-            if isManaged && starters.contains(players[i].id) { report?.ratings.append(.init(playerID: players[i].id, rating: perf)) }
+            if isManaged && starters.contains(players[i].id) { report.ratings.append(.init(playerID: players[i].id, rating: perf)) }
         }
         let attackers=squad.filter{[.st,.lw,.rw,.cm].contains($0.position)}
         for _ in 0..<goals { if let scorer=attackers.randomElement(), let idx=players.firstIndex(where:{$0.id==scorer.id}) { players[idx].stats.goals += 1; if Bool.random(), let assister=attackers.filter({$0.id != scorer.id}).randomElement(), let aidx=players.firstIndex(where:{$0.id==assister.id}) { players[aidx].stats.assists += 1 } } }
-        report?.playerOfTheMatchID = report?.ratings.max(by: {$0.rating < $1.rating})?.playerID
+        report.playerOfTheMatchID = report.ratings.max(by: {$0.rating < $1.rating})?.playerID
     }
 
     private func formationAttackBoost()->Double { switch currentCareer?.formation { case "4-3-3": return 0.25; case "4-2-3-1": return 0.15; case "3-5-2": return 0.1; case "5-3-2": return -0.2; default: return 0 } }
